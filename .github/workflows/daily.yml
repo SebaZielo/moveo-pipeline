@@ -1,0 +1,50 @@
+name: MOVEO daily
+
+# Every morning (Buenos Aires 05:35 = 08:35 UTC): cleanup, harvest, blog, datecheck, map, artwork, sync.
+# Run it by hand from the Actions tab ("Run workflow"): pick steps, or tick "dry run" to see what it
+# would change without writing anything.
+on:
+  schedule:
+    - cron: "35 8 * * *"
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: "Steps (comma list) or all: cleanup,harvest,blog,datecheck,map,artwork,sync"
+        default: "all"
+        required: true
+      dry_run:
+        description: "Dry run: read and compute everything, write nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: moveo-db          # never two runs writing the database at once
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Run
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WEBSITE_SYNC: ${{ vars.WEBSITE_SYNC }}
+          MOVEO_MODEL: ${{ vars.MOVEO_MODEL || 'claude-haiku-4-5-20251001' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          STEPS="${{ inputs.steps }}"
+          if [ -z "$STEPS" ] || [ "$STEPS" = "all" ]; then STEPS="cleanup,harvest,blog,datecheck,map,artwork,sync"; fi
+          python -m pipeline.run all --steps "$STEPS"
