@@ -163,8 +163,12 @@ def step_harvest(c):
     out["directory_report"] = {k: v for k, v in (jload(os.path.join(WORK, "out", "dir_report.json"), {}) or {}).items() if k != "log"} if rebuilt else None
 
     # --- harvest + far-ahead list + build
-    sh(py("harvester.py", "harvest", "--window", "7"), int(os.environ.get("HARVEST_SECONDS", "2400")))
+    secs = int(os.environ.get("HARVEST_SECONDS", "5400"))
+    os.environ["HARVEST_BUDGET"] = str(max(600, secs - 1500))   # stop starting new sources early enough to finish
+    sh(py("harvester.py", "harvest", "--window", "7"), secs)
     report = jload(os.path.join(WORK, "out", "report.json"), {}) or {}
+    if not report:
+        out["warning"] = "harvester produced no report (stopped or crashed): nothing new added today"
     if os.path.exists(os.path.join(WORK, "out", "future_candidates.json")):
         if sh(py("harvester.py", "future", "--existing", "db/future"), 600):
             new_f = {os.path.basename(f)[:-5]: jload(f) for f in glob.glob(os.path.join(WORK, "out", "future", "*.json")) if not f.endswith("_delete.json")}

@@ -3214,9 +3214,12 @@ def harvest(args):
     if not only:  # every registry platform is checked every day (owner asked, 2026-10-06)
         print(f"registry platforms today: {sum(1 for s in srcs if s.get('tier') == 'registry')}")
     report, cands = {}, []
+    budget_end = time.time() + float(os.environ.get("HARVEST_BUDGET", "1e9"))
 
     def one(src):
         log, t0 = [], time.time()
+        if t0 > budget_end:
+            return src["name"], [], {"count": 0, "secs": 0, "log": ["skipped: out of time this run"]}
         try:
             f = KINDS[src["kind"]](src, max(args.window, FUTURE_DAYS), log)
         except Exception as ex:

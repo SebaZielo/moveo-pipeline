@@ -231,6 +231,17 @@ def decide(e, P, today):
     return dict(base, verify="unconfirmed", verifyNote=f"{src}: no clear schedule on page"[:90]), "unconfirmed"
 
 
+def keep_recent_ok(e, p, outcome, today):
+    """A page that is merely silent (no machine-readable date, or only an old occurrence) does not undo a
+    verification made in the last 30 days (by the Claude date check, which read pages more cleverly).
+    The check is recorded in checkedAt/checkNote instead, so the listing isn't re-queued every day."""
+    if (p and outcome in ("unconfirmed", "unconfirmed_past") and e.get("verify") in ("ok", "fixed")
+            and (e.get("verifiedAt") or "") >= (today - dt.timedelta(days=30)).isoformat()
+            and "Page gone" not in (p.get("verifyNote") or "")):
+        return {"checkedAt": today.isoformat(), "checkNote": p.get("verifyNote", "")}, "kept_previous_ok"
+    return p, outcome
+
+
 def queue(events, today, limit):
     T = today.isoformat()
     soon = (today + dt.timedelta(days=7)).isoformat()
@@ -245,7 +256,7 @@ def queue(events, today, limit):
             continue
         if e.get("kind") == "event" and not any(d >= T for d in e.get("dates") or []):
             continue
-        va = e.get("verifiedAt") or ""
+        va = max(e.get("verifiedAt") or "", e.get("checkedAt") or "")
         avail = e.get("kind") != "event" or any(T <= d <= soon for d in e.get("dates") or [])
         if avail and va < stale:
             a.append(e)
@@ -293,7 +304,7 @@ def main():
                 P = {"status": 0, "ok": False, "events": [], "text": "", "err": str(ex)[:100]}
             for e in by_url[u]:
                 try:
-                    res.append((e["id"],) + decide(e, P, today))
+                    res.append((e["id"],) + keep_recent_ok(e, *decide(e, P, today), today))
                 except Exception as ex:
                     res.append((e["id"], None, "error"))
         return res
