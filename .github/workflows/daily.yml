@@ -42,6 +42,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WEBSITE_SYNC: ${{ vars.WEBSITE_SYNC }}
           MOVEO_MODEL: ${{ vars.MOVEO_MODEL || 'claude-haiku-4-5-20251001' }}
+          HARVEST_SKIP: eventbrite,allaccess,complejoteatral   # these block GitHub; a Claude task harvests them
           DRY_RUN: ${{ inputs.dry_run }}
           PYTHONUNBUFFERED: "1"
         run: |

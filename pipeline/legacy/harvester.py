@@ -3210,7 +3210,8 @@ KINDS = {"allevents": run_allevents, "pages": run_pages, "browser": run_browser,
 def harvest(args):
     os.makedirs(OUT, exist_ok=True)
     only = set(args.only.split(",")) if args.only else None
-    srcs = [s for s in SOURCES if (not only or s["name"] in only) and not s.get("retired")]
+    skip = set(x.strip() for x in (getattr(args, "skip", None) or "").split(",") if x.strip())   # HARVEST_SKIP: sites that block this server
+    srcs = [s for s in SOURCES if (not only or s["name"] in only) and s["name"] not in skip and not s.get("retired")]
     if not only:  # every registry platform is checked every day (owner asked, 2026-10-06)
         print(f"registry platforms today: {sum(1 for s in srcs if s.get('tier') == 'registry')}")
     report, cands = {}, []
@@ -3636,7 +3637,7 @@ def apply_review(args):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     sp = ap.add_subparsers(dest="cmd", required=True)
-    h = sp.add_parser("harvest"); h.add_argument("--only"); h.add_argument("--window", type=int, default=7)
+    h = sp.add_parser("harvest"); h.add_argument("--only"); h.add_argument("--skip"); h.add_argument("--window", type=int, default=7)
     b = sp.add_parser("build"); b.add_argument("--existing", default="db/events"); b.add_argument("--max-new", type=int, default=1200); b.add_argument("--fx", type=float)
     r = sp.add_parser("apply-review"); r.add_argument("fixes")
     fu = sp.add_parser("future"); fu.add_argument("--existing", default="db/future"); fu.add_argument("--fx", type=float)

@@ -6,6 +6,8 @@
   python3 -m pipeline.run import --dir DUMP [--only-missing]
                                          one-time copy of the Claude app database (folders of <id>.json per collection)
 Options: --dry-run (read everything, run everything, write nothing; shows what would change), --today YYYY-MM-DD.
+Environment: HARVEST_SKIP=a,b  sources the GitHub run leaves out (sites that block GitHub);
+             HARVEST_ONLY=a,b  harvest just these (from a Claude task), stored directory, recorded as "harvest_only".
 
 Steps (each is independent; one failing never stops the others):
   cleanup   delete listings that are over (ended/cancelled, run ended 3+ days ago, every date 3+ days ago),
@@ -137,6 +139,17 @@ def step_harvest(c):
     fut = Collection(c.st, "future")
     fut.export(os.path.join(WORK, "db", "future"))
     py = lambda *a: [os.path.join(LEGACY, a[0])] + list(a[1:])
+    only = ",".join(x.strip() for x in os.environ.get("HARVEST_ONLY", "").split(",") if x.strip())
+    skip = ",".join(x.strip() for x in os.environ.get("HARVEST_SKIP", "").split(",") if x.strip())
+
+    if only:
+        # HARVEST_ONLY (a Claude task harvesting the sites that block GitHub): just these sources, with the stored
+        # directory; no directory build/discover; the result is recorded as "harvest_only" (see main)
+        out["only"] = only.split(",")
+        c.directory_file()
+        return harvest_sources(c, out, py, fut, ["--only", only], only.split(","))
+    if skip:
+        out["skipped_sources"] = skip.split(",")
 
     # --- organizer directory: rebuild monthly, discover agenda pages daily
     dirs = c.st.list("directory")
@@ -161,11 +174,16 @@ def step_harvest(c):
     if rebuilt:
         write_chunks(c, "dirgeo", os.path.join(WORK, "out", "geochunks"))
     out["directory_report"] = {k: v for k, v in (jload(os.path.join(WORK, "out", "dir_report.json"), {}) or {}).items() if k != "log"} if rebuilt else None
+    return harvest_sources(c, out, py, fut, ["--skip", skip] if skip else [])
 
+
+def harvest_sources(c, out, py, fut, extra, only=None):
+    """harvester.py harvest [+extra] -> future list, build, review, write; merge the report into harvest/state
+    (only the sources that ran are updated there; the others keep their last result)."""
     # --- harvest + far-ahead list + build
     secs = int(os.environ.get("HARVEST_SECONDS", "5400"))
     os.environ["HARVEST_BUDGET"] = str(max(600, secs - 1500))   # stop starting new sources early enough to finish
-    sh(py("harvester.py", "harvest", "--window", "7"), secs)
+    sh(py("harvester.py", "harvest", "--window", "7", *extra), secs)
     report = jload(os.path.join(WORK, "out", "report.json"), {}) or {}
     if not report:
         out["warning"] = "harvester produced no report (stopped or crashed): nothing new added today"
@@ -220,10 +238,13 @@ def step_harvest(c):
         return re.sub(r"\s+", " ", why)[:160]
     zero_why = {n: reason(n) for n in zero}
     run = {"date": c.T, "candidates": sum(r.get("count", 0) for r in report.values()), "added": added,
-           "extended": extended, "deleted": 0, "repaired": [], "by": "pipeline", "review": how}
+           "extended": extended, "deleted": 0, "repaired": [], "by": "pipeline" + ("-only" if only else ""), "review": how}
+    if only:
+        run["only"] = only
+    label = f"only {','.join(only)}" if only else "pipeline run"
     state.update(sources=srcs, updatedAt=dt.datetime.now(BA).isoformat(timespec="seconds"),
                  runs=((state.get("runs") or []) + [run])[-30:],
-                 notes=f"{c.T}: pipeline run; {added} added ({how} review), {extended} extended; {len(zero)} sources at 0.")
+                 notes=f"{c.T}: {label}; {added} added ({how} review), {extended} extended; {len(zero)} sources at 0.")
     c.st.put("harvest", {"state": state})
     out.update(added=added, extended=extended, review=how, reviewed=len(review), dropped=sum(1 for v in fixes.values() if v.get("drop")),
                by_genre=dict(by_genre.most_common()), top_sources=dict(by_source.most_common(8)), sources_at_zero=zero_why)
@@ -436,17 +457,19 @@ def main():
         steps = [s.strip() for s in a.steps.split(",") if s.strip() in STEPS]
     results, failed = {}, []
     for s in steps:
-        print(f"\n===== {s} =====", flush=True)
+        # a HARVEST_ONLY run is recorded as "harvest_only", so it never overwrites the GitHub run's "harvest" entry
+        k = "harvest_only" if s == "harvest" and os.environ.get("HARVEST_ONLY", "").strip() else s
+        print(f"\n===== {k} =====", flush=True)
         t0 = time.time()
         try:
-            results[s] = STEPS[s](c)
+            results[k] = STEPS[s](c)
         except Exception as ex:
             traceback.print_exc()
-            results[s] = {"error": f"{type(ex).__name__}: {str(ex)[:300]}"}
-            failed.append(s)
+            results[k] = {"error": f"{type(ex).__name__}: {str(ex)[:300]}"}
+            failed.append(k)
             c._events = None                       # reload fresh for the next step
-        results[s]["minutes"] = round((time.time() - t0) / 60, 1)
-        print(json.dumps(results[s], ensure_ascii=False, default=str), flush=True)
+        results[k]["minutes"] = round((time.time() - t0) / 60, 1)
+        print(json.dumps(results[k], ensure_ascii=False, default=str), flush=True)
     md = summary_md(c.T, results, dry)
     print("\n" + md)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
