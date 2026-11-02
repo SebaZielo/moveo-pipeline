@@ -41,6 +41,7 @@ What no longer happens automatically is the self-repair. When a site changes its
   - Choose the steps, e.g. `datecheck` or `blog`.
   - Tick **dry run** to see what it would change without writing anything.
 - **Failures:** if a step fails, the run turns red and GitHub emails you. The other steps still run.
+- **Sources at 0:** the summary shows the reason next to each one. To see what a site answers from GitHub's servers, run Actions → **Probe sources** → Run workflow (it writes nothing).
 - **Pause everything:** Actions → MOVEO daily → "…" → Disable workflow.
 
 ## Settings

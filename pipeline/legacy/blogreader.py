@@ -546,6 +546,14 @@ def walk(el, base, out):
         walk(ch, base, out)
 
 def article_root(soup):
+    arts = soup.find_all("article")
+    if len(arts) >= 3:
+        # a list page where every item is its own <article> (Time Out): read their common parent, not the first item
+        p = arts[0].parent
+        while p is not None and len(p.find_all("article")) < len(arts):
+            p = p.parent
+        if p is not None and len(p.get_text(" ", strip=True)) > 400:
+            return p
     for sel in ['[itemprop="articleBody"]', "article .article-body", "article", '[class*="article-body"]',
                 '[class*="articleBody"]', '[class*="body-article"]', '[class*="_article"]', "main", '[role="main"]']:
         el = soup.select_one(sel)

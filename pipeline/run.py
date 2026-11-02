@@ -18,7 +18,7 @@ Steps (each is independent; one failing never stops the others):
   artwork   a real cover picture for listings without one, stored in Supabase Storage    [artwork]
   sync      current listings copied to the website's tables (only when WEBSITE_SYNC=on)  [website sync]
 """
-import argparse, datetime as dt, glob, json, os, shutil, subprocess, sys, time, traceback
+import argparse, datetime as dt, glob, json, os, re, shutil, subprocess, sys, time, traceback
 from collections import Counter
 
 from . import llm
@@ -208,6 +208,17 @@ def step_harvest(c):
         srcs[name] = {"count": rep.get("count", 0), "lastOk": c.T if rep.get("count") else old.get("lastOk"),
                       "notes": (log[-1] if isinstance(log, list) and log else str(log))[:160]}
     zero = sorted(n for n, r in report.items() if not r.get("count"))
+
+    def reason(name):
+        """Why a source gave 0: its last log line, plus the fetch error before it when the last line is only the count."""
+        log = [str(x) for x in ((report.get(name) or {}).get("log") or []) if str(x).strip()]
+        if not log:
+            return "no log"
+        why = log[-1]
+        if re.match(r"listing pages \d+ -> 0 events", why) and len(log) > 1 and re.search(r" -> \d{3} | !! |FAILED", log[-2]):
+            why = log[-2] + " | " + why
+        return re.sub(r"\s+", " ", why)[:160]
+    zero_why = {n: reason(n) for n in zero}
     run = {"date": c.T, "candidates": sum(r.get("count", 0) for r in report.values()), "added": added,
            "extended": extended, "deleted": 0, "repaired": [], "by": "pipeline", "review": how}
     state.update(sources=srcs, updatedAt=dt.datetime.now(BA).isoformat(timespec="seconds"),
@@ -215,7 +226,7 @@ def step_harvest(c):
                  notes=f"{c.T}: pipeline run; {added} added ({how} review), {extended} extended; {len(zero)} sources at 0.")
     c.st.put("harvest", {"state": state})
     out.update(added=added, extended=extended, review=how, reviewed=len(review), dropped=sum(1 for v in fixes.values() if v.get("drop")),
-               by_genre=dict(by_genre.most_common()), top_sources=dict(by_source.most_common(8)), sources_at_zero=zero)
+               by_genre=dict(by_genre.most_common()), top_sources=dict(by_source.most_common(8)), sources_at_zero=zero_why)
     return out
 
 
@@ -262,7 +273,8 @@ def step_blog(c):
         added += 1
     c.events.save()
     links = {k[5:]: v for k, v in rep.items() if k.startswith("link_")}
-    return {"posts_read": rep.get("articles", 0), "listings_checked": rep.get("listings_done", 0), "updated": updated,
+    return {"posts_read": rep.get("articles", 0), "posts_unreadable": rep.get("articles_unreadable", 0),
+            "listings_checked": rep.get("listings_done", 0), "updated": updated,
             "links": links, "duplicates_hidden": rep.get("duplicates_of_platform_listing", 0), "new_postings": added,
             "new_review": how, "left_for_next_run": rep.get("listings_left", 0)}
 
