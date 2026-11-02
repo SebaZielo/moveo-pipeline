@@ -1,0 +1,48 @@
+name: Probe sources
+
+# Diagnostic only: fetch a few source and blog pages from a GitHub runner and print what they answer
+# (HTTP status, size, server, signs of a bot challenge). Run it from the Actions tab when sources show 0.
+# It writes nothing anywhere.
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "Extra URLs to probe (space-separated), optional"
+        default: ""
+        required: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Probe
+        env:
+          EXTRA: ${{ inputs.urls }}
+        run: |
+          python - <<'PY'
+          import os, re, requests
+          UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0 Safari/537.36",
+                "Accept-Language": "es-AR,es;q=0.9,en;q=0.8", "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
+          urls = ["https://www.eventbrite.com.ar/d/argentina--buenos-aires/all-events/?page=1",
+                  "https://www.allaccess.com.ar/",
+                  "https://www.infobae.com/cultura/agenda-cultura/2026/10/02/guia-de-arte-y-cultura-semana-del-2-al-9-de-octubre-de-2026/",
+                  "https://www.timeout.com/buenos-aires/where-to-go-out-best-bars-clubs-speakeasies-plans",
+                  "https://www.malba.org.ar/", "https://complejoteatral.gob.ar/", "https://www.niceto.com.ar/",
+                  "https://www.alternativateatral.com/", "https://api.lu.ma/url?url=buenos-aires"] + os.environ.get("EXTRA", "").split()
+          for u in urls:
+              try:
+                  r = requests.get(u, headers=UA, timeout=25, allow_redirects=True)
+                  t = r.text
+                  text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", t))
+                  title = re.search(r"<title[^>]*>(.*?)</title>", t, re.S | re.I)
+                  hint = [w for w in ("captcha", "challenge", "access denied", "blocked", "cloudflare", "perimeterx", "datadome", "akamai", "verify you are human") if w in t.lower()]
+                  print(f"{r.status_code} {len(t):>8}b text={len(text):>7} server={r.headers.get('server','-'):<14} ld+json={t.count('application/ld+json')} {u[:70]}")
+                  print(f"      title={(title.group(1).strip()[:70] if title else '-')!r} hints={hint} final={r.url[:80]}")
+              except Exception as ex:
+                  print(f"ERR {u[:70]} {type(ex).__name__}: {str(ex)[:120]}")
+          PY
